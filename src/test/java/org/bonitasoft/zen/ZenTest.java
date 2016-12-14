@@ -1,10 +1,14 @@
 package org.bonitasoft.zen;
 
-import static org.assertj.core.api.StrictAssertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 import javax.sql.DataSource;
 
-import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,29 +23,33 @@ import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
 @SpringApplicationConfiguration(classes = { Zen.class })
 public class ZenTest {
 
+    private static int cpt = 0;
+
     @Autowired
     DataSource dataSource;
 
     @Autowired
     JdbcTemplate jdbcTemplate;
 
-    @Before
-    public void before() {
-
-        new
-
+    public void initDBTable() {
         String object = jdbcTemplate.queryForObject("select @@version", String.class);
         assertThat(object).isNotNull().contains("Microsoft SQL Server");
 
         Long count = checkIfTableExists();
         if (count == 0) {
+            System.err.println("table TEST1 does NOT already exist, creating it.");
             jdbcTemplate.execute(
-                    "create table test1(id numeric(19,0) identity (1,1) ,text_value nvarchar(50) )");
+                    "CREATE TABLE test1( id numeric(19,0) identity (1,1), text_value NVARCHAR(50) )");
             count = checkIfTableExists();
+            assertThat(count).isEqualTo(1L);
+        } else {
+            System.err.println("table TEST1 already exists, cleaning it up...");
+            jdbcTemplate.execute("TRUNCATE TABLE test1");
         }
+    }
 
-        assertThat(count).isEqualTo(1L);
-
+    public void cleanupDBTable() {
+        jdbcTemplate.execute("TRUNCATE TABLE test1");
     }
 
     private Long checkIfTableExists() {
@@ -49,23 +57,54 @@ public class ZenTest {
     }
 
     @Test
-    public void should_insert() {
-        //when
-        int nbRows = jdbcTemplate.update("insert into test1(text_value) values(?)", "text");
-
-        //then
-        assertThat(nbRows).isEqualTo(1);
-
+    public void write_then_read() throws Exception {
+        initDBTable();
+        ExecutorService threadPoolExecutor = null;
+        final int expected = 3000;
+        try {
+            threadPoolExecutor = new ThreadPoolExecutor(20, 20, 600, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
+            for (int i = 0; i < expected; i++) {
+                final Thread thread = new InsertRetrieveThread();
+                threadPoolExecutor.submit(thread);
+            }
+        } finally {
+            if (threadPoolExecutor != null) {
+                threadPoolExecutor.shutdown();
+                threadPoolExecutor.awaitTermination(10, TimeUnit.MINUTES);
+            }
+            System.err.println("Created and retrieved " + getCounter() + " elements");
+            cleanupDBTable();
+        }
     }
 
-    @Test
-    public void checkDriverVersion() throws Exception {
-        //when
-        String driverVersion = dataSource.getConnection().getMetaData().getDriverVersion();
+    class InsertRetrieveThread extends Thread {
 
-        //then
-        assertThat(driverVersion).isEqualTo("4.0.2206.100");
+        @Override
+        public void run() {
+            // Write + read xxx times in the same Thread:
+            for (int i = 0; i < 10000; i++) {
+                final int currentCounter = increaseCounter();
+                final String newValue = "write_then_read_test_" + currentCounter;
+                int nbRows = jdbcTemplate.update("INSERT INTO test1(text_value) VALUES(?)", newValue);
+                assertThat(nbRows).isEqualTo(1);
 
+                final Long value = jdbcTemplate.queryForObject("SELECT id FROM test1 WHERE text_value = ?", Long.class, newValue);
+                assertThat(value).isEqualTo(Long.valueOf(currentCounter));
+
+                // print every 1000 elements:
+                if (currentCounter % 1000 == 0) {
+                    System.out.println(Thread.currentThread().getName() + ". New record with ID " + value + " and text: " + newValue);
+                }
+            }
+        }
+    }
+
+    synchronized int increaseCounter() {
+        return ++cpt;
+    }
+
+    int getCounter() {
+        return cpt;
     }
 
 }

@@ -18,9 +18,9 @@ public class testXA {
 
         // Create variables for the connection string.
         String prefix = "jdbc:sqlserver://";
-        String serverName = "localhost";
+        String serverName = "192.168.56.101";
         int portNumber = 1433;
-        String databaseName = "AdventureWorks";
+        String databaseName = "bdm724";
         String user = "bonitadev";
         String password = "secret_password";
         String connectionUrl = prefix + serverName + ":" + portNumber
