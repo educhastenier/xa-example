@@ -3,9 +3,7 @@ package org.bonitasoft.zen;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Executors;
 
 import javax.sql.DataSource;
 
@@ -44,7 +42,7 @@ public class ZenTest {
             assertThat(count).isEqualTo(1L);
         } else {
             System.err.println("table TEST1 already exists, cleaning it up...");
-            jdbcTemplate.execute("TRUNCATE TABLE test1");
+            cleanupDBTable();
         }
     }
 
@@ -59,51 +57,51 @@ public class ZenTest {
     @Test
     public void write_then_read() throws Exception {
         initDBTable();
-        ExecutorService threadPoolExecutor = null;
-        final int expected = 3000;
-        try {
-            threadPoolExecutor = new ThreadPoolExecutor(20, 20, 600, TimeUnit.SECONDS, new LinkedBlockingQueue<Runnable>());
-            for (int i = 0; i < expected; i++) {
-                final Thread thread = new InsertRetrieveThread();
-                threadPoolExecutor.submit(thread);
-            }
-        } finally {
-            if (threadPoolExecutor != null) {
-                threadPoolExecutor.shutdown();
-                threadPoolExecutor.awaitTermination(10, TimeUnit.MINUTES);
-            }
-            System.err.println("Created and retrieved " + getCounter() + " elements");
-            cleanupDBTable();
+        final int nbOfThreads = 20;
+        ExecutorService executor = Executors.newFixedThreadPool(nbOfThreads);
+        for (int i = 0; i < nbOfThreads; i++) {
+            executor.execute(new InsertAndRetrieveRecord(i));
         }
+        executor.shutdown();
+        while (!executor.isTerminated()) {
+        }
+        System.err.println("Finished all threads");
+
+        System.err.println("Created and retrieved " + getCounter() + " elements");
+        //        cleanupDBTable();
     }
 
-    class InsertRetrieveThread extends Thread {
+    class InsertAndRetrieveRecord extends Thread {
 
-        @Override
+        InsertAndRetrieveRecord(int i) {
+            setName("ManuWorkUnit" + i);
+        }
+
         public void run() {
             // Write + read xxx times in the same Thread:
-            for (int i = 0; i < 10000; i++) {
+            for (int i = 0; i < 8000; i++) {
                 final int currentCounter = increaseCounter();
                 final String newValue = "write_then_read_test_" + currentCounter;
                 int nbRows = jdbcTemplate.update("INSERT INTO test1(text_value) VALUES(?)", newValue);
                 assertThat(nbRows).isEqualTo(1);
 
                 final Long value = jdbcTemplate.queryForObject("SELECT id FROM test1 WHERE text_value = ?", Long.class, newValue);
-                assertThat(value).isEqualTo(Long.valueOf(currentCounter));
+                //  assertThat(value).isEqualTo(Long.valueOf(currentCounter));
 
-                // print every 1000 elements:
-                if (currentCounter % 1000 == 0) {
-                    System.out.println(Thread.currentThread().getName() + ". New record with ID " + value + " and text: " + newValue);
+                // print every xxx elements:
+                if (currentCounter % 200 == 0) {
+                    System.out.println(getName() + ". New record with ID " + value + " and text: " + newValue);
                 }
             }
         }
+
     }
 
-    synchronized int increaseCounter() {
+    private synchronized int increaseCounter() {
         return ++cpt;
     }
 
-    int getCounter() {
+    private int getCounter() {
         return cpt;
     }
 
