@@ -7,19 +7,23 @@ import java.util.concurrent.Executors;
 
 import javax.sql.DataSource;
 
-import org.junit.Test;
-import org.junit.runner.RunWith;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.SpringApplicationConfiguration;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestMethod;
+import org.springframework.web.bind.annotation.RestController;
 
 /**
- * @author Laurent Leseigneur
+ * @author Emmanuel Duchastenier
  */
-@RunWith(SpringJUnit4ClassRunner.class)
-@SpringApplicationConfiguration(classes = { Zen.class })
-public class ZenTest {
+@RestController
+@RequestMapping("api/")
+public class ZenController {
+
+    @RequestMapping(value = "run", method = RequestMethod.GET)
+    public void runStress() throws Exception {
+        write_then_read();
+    }
 
     private static int cpt = 0;
 
@@ -38,6 +42,8 @@ public class ZenTest {
             System.err.println("table TEST1 does NOT already exist, creating it.");
             jdbcTemplate.execute(
                     "CREATE TABLE test1( id numeric(19,0) identity (1,1), text_value NVARCHAR(50) )");
+            jdbcTemplate.execute(
+                    "ALTER TABLE test1 ADD CONSTRAINT pk_test1 PRIMARY KEY (id)");
             count = checkIfTableExists();
             assertThat(count).isEqualTo(1L);
         } else {
@@ -54,7 +60,6 @@ public class ZenTest {
         return jdbcTemplate.queryForObject("select COUNT(*) from INFORMATION_SCHEMA.TABLES t where LOWER (t.TABLE_NAME) ='test1'", Long.class);
     }
 
-    @Test
     public void write_then_read() throws Exception {
         initDBTable();
         final int nbOfThreads = 20;
@@ -79,18 +84,20 @@ public class ZenTest {
 
         public void run() {
             // Write + read xxx times in the same Thread:
-            for (int i = 0; i < 8000; i++) {
+            for (int i = 0; i < 5000; i++) {
                 final int currentCounter = increaseCounter();
                 final String newValue = "write_then_read_test_" + currentCounter;
                 int nbRows = jdbcTemplate.update("INSERT INTO test1(text_value) VALUES(?)", newValue);
                 assertThat(nbRows).isEqualTo(1);
 
-                final Long value = jdbcTemplate.queryForObject("SELECT id FROM test1 WHERE text_value = ?", Long.class, newValue);
-                //  assertThat(value).isEqualTo(Long.valueOf(currentCounter));
+                final Long id = jdbcTemplate.queryForObject("SELECT id FROM test1 WHERE text_value = ?", Long.class, newValue);
+                assertThat(id).isNotNull();
+                final Long nbRecords = jdbcTemplate.queryForObject("SELECT count(id) FROM test1 WHERE id = ?", Long.class, id);
+                assertThat(nbRecords).isEqualTo(1L);
 
                 // print every xxx elements:
                 if (currentCounter % 200 == 0) {
-                    System.out.println(getName() + ". New record with ID " + value + " and text: " + newValue);
+                    System.out.println(getName() + ". New record with ID " + id + " and text: " + newValue);
                 }
             }
         }
